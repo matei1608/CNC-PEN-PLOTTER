@@ -5,13 +5,13 @@ edition = "2024"
 
 [dependencies]
 embassy-stm32 = { version = "0.2.0", git = "https://github.com/embassy-rs/embassy", rev = "2e7a2b6", features = [
-  "defmt",
-  "stm32u545re",
-  "unstable-pac",
-  "memory-x",
-  "time-driver-tim4",
-  "exti",
-  "chrono",
+    "defmt",
+    "stm32u545re",
+    "unstable-pac",
+    "memory-x",
+    "time-driver-tim4",
+    "exti",
+    "chrono",
 ] }
 
 # Embedded HAL utilities
