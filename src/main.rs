@@ -4,10 +4,28 @@
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_time::Timer;
+use embassy_time::{Duration, Timer};
 use {defmt_rtt as _, panic_probe as _};
 
-// Secvența Half-Step pentru motorul 28BYJ-48 (8 pași)
+// ==========================================
+// 1. DEFINIREA COMENZILOR G-CODE HARDCODATE
+// ==========================================
+#[derive(Clone, Copy)]
+enum Command {
+    PenUp,
+    PenDown,
+    MoveTo(f32, f32), // Coordonate X și Y în milimetri
+}
+
+// ==========================================
+// 2. CALIBRAREA (FACTORUL DE CONVERSIE)
+// ==========================================
+const STEPS_PER_REV: f32 = 4096.0; // Nr. de pași pentru o rotație completă (Half-Step)
+// Atenție: 32.0 este o valoare estimativă. Reprezintă câți mm se mișcă axa la o rotație completă a rotiței.
+const PINION_CIRCUMFERENCE_MM: f32 = 48.0; 
+const STEPS_PER_MM: f32 = STEPS_PER_REV / PINION_CIRCUMFERENCE_MM;
+
+// Secvența Half-Step pentru motorul 28BYJ-48
 const STEP_SEQUENCE: [[bool; 4]; 8] = [
     [true,  false, false, false],
     [true,  true,  false, false],
@@ -19,76 +37,109 @@ const STEP_SEQUENCE: [[bool; 4]; 8] = [
     [true,  false, false, true ],
 ];
 
-// Definim un Task Embassy refolosibil pentru fiecare motor
-// Adăugăm parametrul `forward: bool`
-#[embassy_executor::task(pool_size = 3)]
-async fn stepper_task(
-    mut in1: Output<'static>,
-    mut in2: Output<'static>,
-    mut in3: Output<'static>,
-    mut in4: Output<'static>,
-    axis_name: &'static str,
-    delay_micros: u64,
-    forward: bool, // <-- Parametru NOU
-) {
-    let step_delay = embassy_time::Duration::from_micros(delay_micros);
-    let directie_str = if forward { "Inainte" } else { "Inapoi" };
-    info!("Task-ul pentru axa {} a pornit! Directie: {}", axis_name, directie_str);
+// ==========================================
+// STRUCTURĂ NOUĂ PENTRU CONTROLUL MOTOARELOR
+// ==========================================
+struct StepperMotor {
+    in1: Output<'static>,
+    in2: Output<'static>,
+    in3: Output<'static>,
+    in4: Output<'static>,
+    step_index: usize,
+}
 
-    loop {
+impl StepperMotor {
+    fn new(in1: Output<'static>, in2: Output<'static>, in3: Output<'static>, in4: Output<'static>) -> Self {
+        Self { in1, in2, in3, in4, step_index: 0 }
+    }
+
+    // Funcția cheie care face EXACT UN PAS.
+    // Va fi folosită intens de Algoritmul Bresenham în pasul următor.
+    fn step_once(&mut self, forward: bool) {
         if forward {
-            // Merge înainte (de la 0 la 7)
-            for step in STEP_SEQUENCE.iter() {
-                if step[0] { in1.set_high(); } else { in1.set_low(); }
-                if step[1] { in2.set_high(); } else { in2.set_low(); }
-                if step[2] { in3.set_high(); } else { in3.set_low(); }
-                if step[3] { in4.set_high(); } else { in4.set_low(); }
-                Timer::after(step_delay).await;
-            }
+            self.step_index = (self.step_index + 1) % 8;
         } else {
-            // Merge înapoi folosind .rev() (de la 7 la 0)
-            for step in STEP_SEQUENCE.iter().rev() {
-                if step[0] { in1.set_high(); } else { in1.set_low(); }
-                if step[1] { in2.set_high(); } else { in2.set_low(); }
-                if step[2] { in3.set_high(); } else { in3.set_low(); }
-                if step[3] { in4.set_high(); } else { in4.set_low(); }
-                Timer::after(step_delay).await;
-            }
+            self.step_index = (self.step_index + 7) % 8; // Matematic echivalent cu -1 pentru array
         }
+
+        let step_state = STEP_SEQUENCE[self.step_index];
+        if step_state[0] { self.in1.set_high(); } else { self.in1.set_low(); }
+        if step_state[1] { self.in2.set_high(); } else { self.in2.set_low(); }
+        if step_state[2] { self.in3.set_high(); } else { self.in3.set_low(); }
+        if step_state[3] { self.in4.set_high(); } else { self.in4.set_low(); }
+    }
+    // Funcție nouă pentru a tăia curentul (să nu se încălzească motorul degeaba)
+    fn stop(&mut self) {
+        self.in1.set_low();
+        self.in2.set_low();
+        self.in3.set_low();
+        self.in4.set_low();
     }
 }
 
 #[embassy_executor::main]
-async fn main(spawner: Spawner) {
+async fn main(_spawner: Spawner) {
     let p = embassy_stm32::init(Default::default());
-    info!("Sistem CNC pornit. Inițializăm ambele axe...");
+    
+    info!("Sistem CNC initializat!");
+    info!("Calibrare: {} pasi pentru 1 milimetru.", STEPS_PER_MM);
 
-    // === CONFIGURARE AXA Z ===
-    let in4_z = Output::new(p.PA8, Level::Low, Speed::Low); // D7
-    let in3_z = Output::new(p.PB5, Level::Low, Speed::Low); // D4
-    let in2_z = Output::new(p.PB4, Level::Low, Speed::Low); // D5
-    let in1_z = Output::new(p.PB10, Level::Low, Speed::Low); // D11
+    // Initializare Motoare cu pinii tai corectati
+    let _motor_z = StepperMotor::new(
+        Output::new(p.PB10, Level::Low, Speed::Low),
+        Output::new(p.PB4, Level::Low, Speed::Low),
+        Output::new(p.PB5, Level::Low, Speed::Low),
+        Output::new(p.PA8, Level::Low, Speed::Low),
+    );
 
-    // === CONFIGURARE AXA Y ===
-    let in1_y = Output::new(p.PB3, Level::Low, Speed::Low);  // D3
-    let in2_y = Output::new(p.PC8, Level::Low, Speed::Low); // D2
-    let in3_y = Output::new(p.PA2, Level::Low, Speed::Low);  // D1
-    let in4_y = Output::new(p.PA3, Level::Low, Speed::Low);  // D0
+    let mut motor_y = StepperMotor::new(
+        Output::new(p.PB3, Level::Low, Speed::Low),
+        Output::new(p.PC8, Level::Low, Speed::Low),
+        Output::new(p.PA2, Level::Low, Speed::Low),
+        Output::new(p.PA3, Level::Low, Speed::Low),
+    );
 
-     // === CONFIGURARE AXA X ===
-    let in4_x = Output::new(p.PC7, Level::Low, Speed::Low);  // D3
-    let in3_x = Output::new(p.PC6, Level::Low, Speed::Low); // D2
-    let in2_x = Output::new(p.PC9, Level::Low, Speed::Low);  // D1
-    let in1_x = Output::new(p.PA7, Level::Low, Speed::Low);  // D0
+    let mut motor_x = StepperMotor::new(
+        Output::new(p.PA7, Level::Low, Speed::Low),
+        Output::new(p.PC9, Level::Low, Speed::Low),
+        Output::new(p.PC6, Level::Low, Speed::Low),
+        Output::new(p.PC7, Level::Low, Speed::Low),
+    );
 
-    // Pornim ambele motoare în paralel folosind spawner-ul Embassy.
-    // Al șaselea parametru este delay-ul (viteza). Le poți pune viteze diferite dacă vrei!
-    unwrap!(spawner.spawn(stepper_task(in1_z, in2_z, in3_z, in4_z, "Z", 400, false)));
-    unwrap!(spawner.spawn(stepper_task(in1_y, in2_y, in3_y, in4_y, "Y", 400, false)));
-    unwrap!(spawner.spawn(stepper_task(in1_x, in2_x, in3_x, in4_x, "X", 400, false)));
+    // ==========================================
+    // G-CODE HARDCODAT (Traseul nostru de test)
+    // Va desena o linie de 10mm, apoi una de 20mm.
+    // ==========================================
+    let traseu_test = [
+        Command::PenUp,
+        Command::MoveTo(10.0, 10.0), // Ne deplasam in pozitia de start (10mm, 10mm)
+        Command::PenDown,
+        Command::MoveTo(20.0, 10.0), // Desenam o linie orizontala de 10mm
+        Command::MoveTo(20.0, 30.0), // Desenam o linie verticala de 20mm
+        Command::PenUp,
+        Command::MoveTo(0.0, 0.0),   // Ne intoarcem la punctul de Origine (Home)
+    ];
 
-    // Bucla din main nu mai trebuie să facă nimic, task-urile rulează în fundal
+    info!("Incepem executia traseului hardcodat...");
+
+    // Aici va veni bucla care parcurge array-ul `traseu_test` 
+    // si apeleaza functiile de miscare pe care le vom scrie la Pasul 3 si 4.
+
+    // Rulăm fix 4096 de pași
+    for _ in 0..4096 {
+        motor_y.step_once(true); // true = direcția înainte. Pune 'false' dacă vrei să se miște invers.
+        Timer::after(Duration::from_micros(1500)).await; // 1.5ms delay între pași pentru mișcare fină
+    }
+
+    
+
+    info!("GATA! Masoara acum cati milimetri s-a deplasat cremaliera.");
+    
+    // Oprim curentul de la motor
+    motor_y.stop();
+
+
     loop {
-        Timer::after(embassy_time::Duration::from_secs(1)).await;
+        Timer::after(Duration::from_secs(1)).await;
     }
 }
