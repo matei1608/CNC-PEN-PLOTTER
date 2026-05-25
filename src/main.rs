@@ -220,24 +220,45 @@ async fn main(_spawner: Spawner) {
     let mut buf = [0u8; 128]; // Buffer pentru a citi caracterele venite de la PC
 
     loop {
-        match usart.read_until_idle(&mut buf).await {
+       match usart.read_until_idle(&mut buf).await {
             Ok(len) if len > 0 => {
-                // Folosim un from_utf8 sigur. Daca apar caractere ciudate/bruiaj, nu crapa, ci devine gol ("")
                 let safe_str = core::str::from_utf8(&buf[..len]).unwrap_or("");
-                let cmd = parse_gcode(safe_str, current_x, current_y);
+                
+                // === FILTRUL SUPREM ===
+                // 1. Spargem textul la fiecare Enter (\n)
+                // 2. Curățăm fiecare bucată atât de spații, cât și de caractere \0 (Null)
+                // 3. Păstrăm doar bucățile care au text real în ele
+                // 4. O luăm pe ultima!
+                let clean_cmd_str = safe_str
+                    .split('\n')
+                    .map(|line| line.trim_matches(|c: char| c == '\0' || c.is_whitespace()))
+                    .filter(|line| !line.is_empty())
+                    .last()
+                    .unwrap_or("");
 
-                match cmd {
-                    Command::PenUp => pen_up(&mut motor_z).await,
-                    Command::PenDown => pen_down(&mut motor_z).await,
-                    Command::MoveTo(tx, ty) => {
-                        draw_line(&mut motor_x, &mut motor_y, &mut current_x, &mut current_y, tx, ty).await;
-                    }
-                    Command::Unknown => {
-                        // Ignoram elegant comenzile necunoscute
+                info!("String brut: {:?}", safe_str);
+                info!("Comanda curata: {:?}", clean_cmd_str);
+
+                if !clean_cmd_str.is_empty() {
+                    let cmd = parse_gcode(clean_cmd_str, current_x, current_y);
+
+                    match cmd {
+                        Command::PenUp => pen_up(&mut motor_z).await,
+                        Command::PenDown => pen_down(&mut motor_z).await,
+                        Command::MoveTo(tx, ty) => {
+                            info!("-> Deseneaza pana la X:{} Y:{}", tx, ty);
+                            draw_line(&mut motor_x, &mut motor_y, &mut current_x, &mut current_y, tx, ty).await;
+                        }
+                        Command::Unknown => {
+                            warn!("Comanda necunoscuta ignorata.");
+                        }
                     }
                 }
 
-                // Indiferent ce s-a executat, trimitem OK ca sa deblocam Python-ul
+                // Curățăm buffer-ul pentru tura viitoare
+                buf.fill(0);
+
+                // Deblocăm Python-ul
                 let _ = usart.write(b"OK\n").await;
             }
             Ok(_) => {

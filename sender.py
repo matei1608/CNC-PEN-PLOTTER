@@ -15,7 +15,7 @@ def send_gcode():
     try:
         # 1. Deschidem conexiunea serială cu placa STM32
         print(f"Incercam sa deschidem portul {SERIAL_PORT} la {BAUD_RATE} baud...")
-        s = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=2)
+        s = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=60)
         
         # Așteptăm puțin pentru ca placa să inițializeze conexiunea USB
         time.sleep(2) 
