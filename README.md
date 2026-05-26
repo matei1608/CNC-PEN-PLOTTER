@@ -39,6 +39,7 @@ cd CNC-PEN-PLOTTER
 
 # Build and flash the firmware to the Nucleo board
 cargo run --release
+```
 
 ### 2. Send G-Code (PC)
 The `sender.py` script requires Python 3 and the `pyserial` library.
