@@ -1,83 +1,51 @@
-# NUCLEO-U545RE-Q
+# 📠 STM32 Rust CNC Plotter
 
-![NUCLEO STM32U535RE-Q](./nucleo_stm32u535re-q.avif "NUCLEO STM32U535RE-Q board")
+A 2D CNC Plotter built with **Rust (Embassy)** on an **STM32U5** microcontroller, capable of drawing complex vector graphics by interpreting standard G-code sent via a Python-based serial sender.
 
-### ARDUINO® power connector (CN6) pinout
+![Project Image](hw2.webp) 
 
-| Pin | Pin label | Signal name | STM32 pin | Additional function |
-| --- | --------- | ----------- | --------- | ------------------- |
-| 1   | NC        | NC          | -         | RESERVED            |
-| 2   | IOREF     | IOREF       | -         | I/O REF             |
-| 3   | NRST      | NRST        | NRST      | RESET               |
-| 4   | 3V3       | 3V3         | -         | 3V3 input/output    |
-| 5   | 5V        | 5V          | -         | 5V output           |
-| 6   | GND       | GND         | -         | GND                 |
-| 7   | GND       | GND         | -         | GND                 |
-| 8   | VIN       | VIN         | -         | VIN (7-12 V)        |
 
-### ARDUINO® ADC connector (CN8) pinout
+## 🛠️ Features
+* **Asynchronous Embedded Rust:** Built entirely in `no_std` Rust utilizing the Embassy async framework for highly efficient, non-blocking hardware control.
+* **Bresenham's Line Algorithm:** Implemented from scratch to ensure perfectly synchronized X and Y axis stepper motor movements for drawing smooth diagonal lines.
+* **Robust UART Handshaking:** Uses a strict command-and-acknowledge protocol (with zero-byte filtering) via `usart::read_until_idle` to prevent buffer overrun and dropped commands.
+* **Custom G-Code Parser:** Lightweight, custom-built parser that translates raw serial strings (e.g., `G1 X50 Y20`, `M3`, `M5`) into mathematical steps.
 
-| Pin | Pin label | Signal name | STM32 pin | Additional function |
-| --- | --------- | ----------- | --------- | ------------------- |
-| 1   | A0        | ADC         | PA0       | ADC1_IN5            |
-| 2   | A1        | ADC         | PA1       | ADC1_IN6            |
-| 3   | A2        | ADC         | PA4       | ADC1_IN9            |
-| 4   | A3        | ADC         | PB0       | ADC1_IN15           |
-| 5   | A4        | ADC/I²C     | PC1       | ADC1_IN2/I2C3_SDA   |
-| 6   | A5        | ADC/I²C     | PC0       | ADC1_IN1I2C3_SCL    |
+## ⚙️ Hardware Components (BOM)
+* **Microcontroller:** STM32U545RE (Nucleo-64)
+* **Motors:** 3x 28BYJ-48 Stepper Motors (Half-step mode, 4096 steps/rev)
+* **Motor Drivers:** 3x ULN2003
+* **Mechanics:** 3D Printed Rack and Pinion mechanism (XY axes + Z-axis for Pen Up/Down)
+* **Misc:** Breadboard, jumper wires, pen/pencil, and standard 5V power supply.
 
-### ARDUINO® D[7-0] connector (CN9) pinout
+## 🔌 Pinout Mapping
 
-| Pin | Pin label | Signal name | STM32 pin | Additional function |
-| --- | --------- | ----------- | --------- | ------------------- |
-| 1   | D7        | IO          | PA8       | I/O                 |
-| 2   | D6        | PWM         | PB10      | TIM2_CH3            |
-| 3   | D5        | PWM         | PB4       | TIM3_CH1            |
-| 4   | D4        | IO          | PB5       | I/O                 |
-| 5   | D3        | PWM         | PB3       | TIM2_CH2            |
-| 6   | D2        | IO          | PC8       | I/O                 |
-| 7   | D1        | USART_A_TX  | PA2       | LPUART1             |
-| 8   | D0        | USART_A_RX  | PA3       | LPUART1             |
+| Axis / Function | IN1 (Pin) | IN2 (Pin) | IN3 (Pin) | IN4 (Pin) |
+| :--- | :--- | :--- | :--- | :--- |
+| **X-Axis** | `PA7` | `PC9` | `PC6` | `PC7` |
+| **Y-Axis** | `PB3` | `PC8` | `PA2` | `PA3` |
+| **Z-Axis (Pen)**| `PB10`| `PB4` | `PB5` | `PA8` |
 
-### ARDUINO® D[15-8] connector (CN5) pinout
+*Note: Serial communication (UART) uses `PA9` (TX) and `PA10` (RX), which are internally routed through the on-board ST-LINK Virtual COM Port.*
 
-| Pin | Pin label | Signal name  | STM32 pin | Additional function |
-| --- | --------- | ------------ | --------- | ------------------- |
-| 1   | D15       | I2C_SCL      | PB6       | I2C1_SCL/I2C4_SCL   |
-| 2   | D14       | I2C_SDA      | PB7       | I2C1_SDA/I2C4_SDA   |
-| 3   | DVREFP    | -            | -         | -                   |
-| 4   | GND       | -            | -         | -                   |
-| 5   | D13       | SPI_SCK      | PA5       | SPI1_SCK            |
-| 6   | D12       | SPI_MISO     | PA6       | SPI1_MISO           |
-| 7   | D11       | SPI_MOSI/PWM | PA7       | SPI1_MOSI/TIM3_CH2  |
-| 8   | D10       | SPI_NSS/PWM  | PC9       | SPI_NSS/TIM3_CH4    |
-| 9   | D9        | PWM          | PC6       | TIM3_CH1            |
-| 10  | D8        | IO           | PC7       | -                   |
+## 🚀 How to Run the Project
 
-More informations can be found [here](https://www.st.com/en/evaluation-tools/nucleo-u545re-q.html?ecmp=tt9470_gl_link_feb2019&rt=um&id=UM3062#overview).
+### 1. Flash the Firmware (STM32)
+Ensure you have the Rust `nightly` toolchain and the required target (`thumbv8m.main-none-eabihf`) installed.
+```bash
+# Clone the repository
+git clone [https://github.com/matei1608/CNC-PEN-PLOTTER](https://github.com/matei1608/CNC-PEN-PLOTTER.git)
+cd CNC-PEN-PLOTTER
 
-## Examples:
+# Build and flash the firmware to the Nucleo board
+cargo run --release
 
-### Blinky
+### 2. Send G-Code (PC)
+The `sender.py` script requires Python 3 and the `pyserial` library.
 
-This example demonstrates the most basic embedded program: blinking an LED. It configures GPIO pin `PA5` as an output and asynchronously toggles it every 200 milliseconds, printing the state to the console.
+```bash
+# Install pyserial
+pip install pyserial
 
-### ADC
-
-This example demonstrates how to read an analog voltage using the ADC on an STM32 microcontroller. It continuously samples a voltage on pin `PA0`, converts the raw 14-bit reading to a voltage value, and prints it to the console using `defmt`.
-
-### PWM
-
-This example demonstrates how to generate a basic PWM (Pulse-Width Modulation) signal on an STM32 microcontroller. It configures Timer 2 (`TIM2`) to produce a 1 kHz signal on pin `PA0` with a fixed 10% duty cycle, which is useful for tasks like dimming an LED.
-
-### SPI ASYNC
-
-This example demonstrates how to perform asynchronous SPI (Serial Peripheral Interface) communication using DMA (Direct Memory Access) on an STM32 microcontroller with the Embassy framework. It configures the `SPI1` peripheral to repeatedly send a string like "Hello DMA World!" and simultaneously read data into a buffer, which is useful for communicating efficiently with external devices like sensors or memory chips without blocking the CPU.
-
-### I2C ASYNC
-
-This example demonstrates how to perform asynchronous I2C communication using DMA and interrupts on an STM32 microcontroller with the Embassy framework. It configures `I2C1` to continuously read a 4-byte data packet from a sensor, then processes the raw data into a meaningful signed integer value, which is useful for efficiently polling external peripherals without blocking the CPU.
-
-### USB
-
-This example demonstrates how to implement a vendor-specific USB bulk device on an STM32 microcontroller using the Embassy framework. It configures the necessary clocks (`HSI48`) and the USB peripheral to create a device with bulk endpoints that performs a simple loopback, echoing any data it receives from the host. This serves as a foundation for building custom high-throughput peripherals that can be controlled by host software using libraries like libusb or WinUSB.
+# Run the sender script (make sure 'desen.gcode' is in the same folder)
+python3 sender.py
